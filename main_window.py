@@ -26,6 +26,9 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
         
+        # Подключаем обработчик переключения вкладок
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+        
         # Основная вкладка
         self.main_widget = QWidget()
         self.main_layout = QGridLayout()
@@ -180,6 +183,17 @@ class MainWindow(QMainWindow):
         self.analytics_layout.setContentsMargins(0, 0, 0, 0)
         self.analytics_layout.setSpacing(0)
         
+    def on_tab_changed(self, index):
+        """Обработчик переключения вкладок"""
+        # Если переключились на вкладку "Аналитика" (индекс 1)
+        if index == 1:
+            # Обновляем данные таблицы и графики
+            self.update_table()
+            self.update_charts()
+            # Принудительно обновляем отображение графиков
+            for canvas in [self.canvas1, self.canvas2, self.canvas3]:
+                canvas.draw()
+        
     def show_all_products(self):
         """Показать все продукты"""
         self.update_table()
@@ -264,8 +278,12 @@ class MainWindow(QMainWindow):
                 data['sales_volume'], data['price']
             ))
             self.conn.commit()
+            # Обновляем таблицу и графики
             self.update_table()
             self.update_charts()
+            
+            # Показываем сообщение об успешном добавлении
+            QMessageBox.information(self, "Успех", "Продукт успешно добавлен.")
             
     def edit_product(self):
         """Редактирование продукта"""
@@ -315,8 +333,12 @@ class MainWindow(QMainWindow):
                 new_data['sales_volume'], new_data['price'], product_id
             ))
             self.conn.commit()
+            # Обновляем таблицу с пересчетом скидок
             self.update_table()
             self.update_charts()
+            
+            # Показываем сообщение об успешном обновлении
+            QMessageBox.information(self, "Успех", "Продукт успешно обновлен. Скидки пересчитаны.")
             
     def delete_product(self):
         """Удаление продукта"""
@@ -337,8 +359,12 @@ class MainWindow(QMainWindow):
         if confirm == QMessageBox.Yes:
             self.cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
             self.conn.commit()
+            # Обновляем таблицу и графики
             self.update_table()
             self.update_charts()
+            
+            # Показываем сообщение об успешном удалении
+            QMessageBox.information(self, "Успех", "Продукт успешно удален.")
             
     def search_product(self):
         """Поиск продукта"""
@@ -410,7 +436,7 @@ class MainWindow(QMainWindow):
     def calculate_discounts(self):
         """Рассчет скидок для товаров, пролежавших более половины срока хранения"""
         self.cursor.execute('''
-            SELECT id, name, price, receipt_date, storage_days
+            SELECT id, name, price, receipt_date, storage_days, purchase_volume, sales_volume
             FROM products
             WHERE
                 julianday('now') - julianday(receipt_date) > storage_days / 2
@@ -420,17 +446,30 @@ class MainWindow(QMainWindow):
         
         discounted_products = []
         for product in products:
-            product_id, name, price, receipt_date, storage_days = product
-            days_in_storage = (datetime.now() - datetime.strptime(receipt_date, '%Y-%m-%d')).days
-            discount_percent = min(100, int((days_in_storage / storage_days) * 100))
-            discounted_price = price * (1 - discount_percent/100)
-            discounted_products.append({
-                'id': product_id,
-                'name': name,
-                'original_price': price,
-                'discounted_price': discounted_price,
-                'discount_percent': discount_percent
-            })
+            product_id, name, price, receipt_date, storage_days, purchase_volume, sales_volume = product
+            
+            try:
+                # Рассчитываем количество дней в хранении
+                days_in_storage = (datetime.now() - datetime.strptime(receipt_date, '%Y-%m-%d')).days
+                
+                # Рассчитываем процент скидки на основе времени хранения
+                if days_in_storage > storage_days / 2:
+                    # Прогрессивная скидка: от 5% до 50% в зависимости от времени хранения
+                    progress = min(1.0, (days_in_storage - storage_days / 2) / (storage_days / 2))
+                    discount_percent = min(50, int(5 + progress * 45))  # От 5% до 50%
+                    
+                    discounted_price = price * (1 - discount_percent / 100)
+                    
+                    discounted_products.append({
+                        'id': product_id,
+                        'name': name,
+                        'original_price': price,
+                        'discounted_price': discounted_price,
+                        'discount_percent': discount_percent
+                    })
+            except ValueError:
+                # Если дата некорректна, пропускаем товар
+                continue
             
         return discounted_products
 
